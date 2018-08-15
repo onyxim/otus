@@ -1,0 +1,4 @@
+.directory
+*.log-*
+!*.gz
+.idea/workspace.xml
