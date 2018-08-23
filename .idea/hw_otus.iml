@@ -5,7 +5,7 @@
       <sourceFolder url="file://$MODULE_DIR$/01_log" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/venv_otus" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 3.6 (venv_otus)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 3.6 (otus)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
   <component name="TestRunnerService">
