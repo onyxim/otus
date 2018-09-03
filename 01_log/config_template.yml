@@ -1,0 +1,15 @@
+# Минимальное суммарное время на один URL для попадания в отчет в секундах
+report_size: 1000
+reports_dir: "./reports"
+nginx_logs_dir: "./log"
+# Место где будет размещаться лог лога: -)
+analyzer_log_file: "./logfile.log"
+# В процентах, процент успешно распарсенных логов, чтобы создался отчет для лога
+parse_success_threshold_percent: 100
+# В секундах максимальное время парсинга одного лога
+max_time_parsing_for_log: 600
+# Шаблон для имени отчета
+report_name_template: "report-{}.html"
+## Также можно переопределить regex для парсинга имени файла и для парсинга строки лога
+# nginx_log_name_re:
+# nginx_line_log_re:

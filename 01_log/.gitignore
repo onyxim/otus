@@ -2,3 +2,6 @@
 *.log-*
 !*.gz
 .idea/workspace.xml
+reports/
+!reports/report-2017.06.30.html
+!reports/jquery.tablesorter.min.js
