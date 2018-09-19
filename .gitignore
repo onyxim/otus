@@ -1,2 +1,4 @@
-*.egg-info
-.idea/workspace.xml
+**/*.egg-info
+**/.ipynb_checkpoints
+**/._*
+**/.idea
