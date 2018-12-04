@@ -1,0 +1,22 @@
+version: '3.7'
+services:
+
+  memc1: &memcached
+    image: memcached:1.5.12-alpine
+    ports:
+      - '33013:11211'
+
+  memc2:
+    <<: *memcached
+    ports:
+      - '33014:11211'
+
+  memc3:
+    <<: *memcached
+    ports:
+      - '33015:11211'
+
+  memc4:
+    <<: *memcached
+    ports:
+      - '33016:11211'

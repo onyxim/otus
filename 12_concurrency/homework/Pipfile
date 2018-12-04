@@ -1,0 +1,13 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+python-memcached = "==1.59"
+protobuf = "==3.6.1"
+
+[dev-packages]
+
+[requires]
+python_version = "3.7"

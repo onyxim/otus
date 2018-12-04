@@ -24,7 +24,7 @@ def dot_rename(path):
     os.rename(path, os.path.join(head, "." + fn))
 
 
-def insert_appsinstalled(memc_addr, appsinstalled, dry_run=False):
+def insert_appsinstalled(memc_addr: str, appsinstalled, dry_run=False):
     ua = appsinstalled_pb2.UserApps()
     ua.lat = appsinstalled.lat
     ua.lon = appsinstalled.lon
@@ -39,21 +39,21 @@ def insert_appsinstalled(memc_addr, appsinstalled, dry_run=False):
         else:
             memc = memcache.Client([memc_addr])
             memc.set(key, packed)
-    except Exception, e:
+    except Exception as e:
         logging.exception("Cannot write to memc %s: %s" % (memc_addr, e))
         return False
     return True
 
 
 def parse_appsinstalled(line):
-    line_parts = line.strip().split("\t")
+    line_parts = line.strip().split(b"\t")
     if len(line_parts) < 5:
         return
     dev_type, dev_id, lat, lon, raw_apps = line_parts
     if not dev_type or not dev_id:
         return
     try:
-        apps = [int(a.strip()) for a in raw_apps.split(",")]
+        apps = [int(a.strip()) for a in raw_apps.split(b",")]
     except ValueError:
         apps = [int(a.strip()) for a in raw_apps.split(",") if a.isidigit()]
         logging.info("Not all user apps are digits: `%s`" % line)
@@ -66,10 +66,10 @@ def parse_appsinstalled(line):
 
 def main(options):
     device_memc = {
-        "idfa": options.idfa,
-        "gaid": options.gaid,
-        "adid": options.adid,
-        "dvid": options.dvid,
+        b"idfa": options.idfa,
+        b"gaid": options.gaid,
+        b"adid": options.adid,
+        b"dvid": options.dvid,
     }
     for fn in glob.iglob(options.pattern):
         processed = errors = 0
@@ -83,7 +83,7 @@ def main(options):
             if not appsinstalled:
                 errors += 1
                 continue
-            memc_addr = device_memc.get(appsinstalled.dev_type)
+            memc_addr: str = device_memc.get(appsinstalled.dev_type)
             if not memc_addr:
                 errors += 1
                 logging.error("Unknow device type: %s" % appsinstalled.dev_type)
@@ -110,7 +110,7 @@ def main(options):
 def prototest():
     sample = "idfa\t1rfw452y52g2gq4g\t55.55\t42.42\t1423,43,567,3,7,23\ngaid\t7rfw452y52g2gq4g\t55.55\t42.42\t7423,424"
     for line in sample.splitlines():
-        dev_type, dev_id, lat, lon, raw_apps = line.strip().split("\t")
+        dev_type, dev_id, lat, lon, raw_apps = line.strip().split(b"\t")
         apps = [int(a) for a in raw_apps.split(",") if a.isdigit()]
         lat, lon = float(lat), float(lon)
         ua = appsinstalled_pb2.UserApps()
@@ -143,6 +143,6 @@ if __name__ == '__main__':
     logging.info("Memc loader started with options: %s" % opts)
     try:
         main(opts)
-    except Exception, e:
+    except Exception as e:
         logging.exception("Unexpected error: %s" % e)
         sys.exit(1)
