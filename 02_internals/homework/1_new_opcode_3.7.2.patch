@@ -1,0 +1,86 @@
+diff --git a/Include/opcode.h b/Include/opcode.h
+index fc6cbf3a7a..72297eabda 100644
+--- a/Include/opcode.h
++++ b/Include/opcode.h
+@@ -127,6 +127,7 @@ extern "C" {
+ #define BUILD_TUPLE_UNPACK_WITH_CALL 158
+ #define LOAD_METHOD             160
+ #define CALL_METHOD             161
++#define LOAD_OTUS               162
+ 
+ /* EXCEPT_HANDLER is a special, implicit block type which is created when
+    entering an except handler. It is not an opcode but we define it here
+diff --git a/Lib/opcode.py b/Lib/opcode.py
+index 368472d981..f1f81b339e 100644
+--- a/Lib/opcode.py
++++ b/Lib/opcode.py
+@@ -213,5 +213,6 @@ def_op('BUILD_TUPLE_UNPACK_WITH_CALL', 158)
+ 
+ name_op('LOAD_METHOD', 160)
+ def_op('CALL_METHOD', 161)
++def_op('LOAD_OTUS', 162)
+ 
+ del def_op, name_op, jrel_op, jabs_op
+diff --git a/Python/ceval.c b/Python/ceval.c
+index c394b9b482..0b30056569 100644
+--- a/Python/ceval.c
++++ b/Python/ceval.c
+@@ -1084,6 +1084,25 @@ _PyEval_EvalFrameDefault(PyFrameObject *f, int throwflag)
+             FAST_DISPATCH();
+         }
+ 
++        // New LOAD_OTUS opcode
++        TARGET(LOAD_OTUS){
++            PyObject *value2 = GETLOCAL(0);
++            if (value2 == NULL) {
++            format_exc_check_arg(PyExc_UnboundLocalError,
++            UNBOUNDLOCAL_ERROR_MSG,
++            PyTuple_GetItem(co->co_varnames, oparg));
++            goto error;
++            }
++            Py_INCREF(value2);
++            PUSH(value2);
++            // load_const
++            PyObject *value3 = GETITEM(consts, oparg);
++            Py_INCREF(value3);
++            PUSH(value3);
++            FAST_DISPATCH();
++
++        }
++
+         PREDICTED(LOAD_CONST);
+         TARGET(LOAD_CONST) {
+             PyObject *value = GETITEM(consts, oparg);
+diff --git a/Python/opcode_targets.h b/Python/opcode_targets.h
+index da6d032bce..eab4070ef4 100644
+--- a/Python/opcode_targets.h
++++ b/Python/opcode_targets.h
+@@ -161,7 +161,7 @@ static void *opcode_targets[256] = {
+     &&_unknown_opcode,
+     &&TARGET_LOAD_METHOD,
+     &&TARGET_CALL_METHOD,
+-    &&_unknown_opcode,
++    &&TARGET_LOAD_OTUS,
+     &&_unknown_opcode,
+     &&_unknown_opcode,
+     &&_unknown_opcode,
+diff --git a/Python/peephole.c b/Python/peephole.c
+index a3b078fdf1..c81ac72029 100644
+--- a/Python/peephole.c
++++ b/Python/peephole.c
+@@ -297,6 +297,15 @@ PyCode_Optimize(PyObject *code, PyObject* consts, PyObject *names,
+                 cumlc = 0;
+                 break;
+ 
++
++                // New OTUS opcode
++            case LOAD_FAST:
++                if (nextop == LOAD_CONST  && get_arg(codestr, i) == 0){
++                    codestr[op_start + 1] = PACKOPARG(LOAD_OTUS, 0);
++                    fill_nops(codestr, op_start, nexti + 1);
++                }
++                break;
++
+                 /* Try to fold tuples of constants.
+                    Skip over BUILD_SEQN 1 UNPACK_SEQN 1.
+                    Replace BUILD_SEQN 2 UNPACK_SEQN 2 with ROT2.
