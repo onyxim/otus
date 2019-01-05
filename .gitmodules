@@ -1,0 +1,3 @@
+[submodule "02_internals/homework/cpython"]
+	path = 02_internals/homework/cpython
+	url = git@github.com:onyxim/cpython.git
