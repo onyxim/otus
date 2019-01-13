@@ -1,0 +1,12 @@
+!!python/object:api.Config
+# Можно устноавить любые параметры для подключения в соответсвии с параметрами redis.client.Redis#__init__
+cache_connection_settings: &conn_settings
+  # in seconds
+  socket_timeout: 60
+  host: localhost
+  port: 6379
+  db: 0
+store_connection_settings:
+  <<: *conn_settings
+# Количество попыток сделать запрос повторно, прежде чем сдаться.
+retry_count: 3

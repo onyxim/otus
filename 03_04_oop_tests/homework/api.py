@@ -3,12 +3,16 @@ import datetime
 import hashlib
 import json
 import logging
+import os
 import uuid
+import yaml
 from abc import ABC, abstractmethod, ABCMeta
+from argparse import ArgumentParser
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from optparse import OptionParser
+from typing import Dict, Any
 
 from scoring import get_score, get_interests
+from store import Store
 
 SALT = "Otus"
 ADMIN_LOGIN = "admin"
@@ -36,7 +40,7 @@ GENDERS = {
 }
 
 
-class MyException(Exception):
+class MyException(BaseException):
     def __init__(self, *args, response=None, code=INVALID_REQUEST, **kwargs):
         self.response = response
         self.code = code
@@ -96,6 +100,11 @@ class EmailField(CharField):
 
 
 class PhoneField(Field):
+    MSG_INT = 'Value "{}" of param "{}" should only contains numbers'
+    MSG_TYPES = 'Value "{}" of param "{}" should be only str or int types'
+    MSG_LENGTH = 'Value "{}" of param "{}" should be 11 symbols length'
+    MSG_START_7 = 'Value "{}" of param "{}" should started with "7"'
+
     def _validate(self, value):
         original_value = value
         if isinstance(value, int):
@@ -104,55 +113,60 @@ class PhoneField(Field):
             try:
                 int(value)
             except ValueError:
-                raise MyException(response='Value "{}" of param "{}" should only contains numbers'
-                                  .format(value, self.field_name))
+                raise MyException(response=self.MSG_INT.format(value, self.field_name))
         else:
-            raise MyException(response='Value "{}" of param "{}" should be only str or int types'
-                              .format(value, self.field_name))
+            raise MyException(response=self.MSG_TYPES.format(value, self.field_name))
         if len(value) != 11:
-            raise MyException(response='Value "{}" of param "{}" should be 11 symbols length'
-                              .format(value, self.field_name))
+            raise MyException(response=self.MSG_LENGTH.format(value, self.field_name))
         if not value.startswith('7'):
-            raise MyException(response='Value "{}" of param "{}" should started with "7"'
-                              .format(value, self.field_name))
+            raise MyException(response=self.MSG_START_7.format(value, self.field_name))
         return original_value
 
 
 class DateField(Field):
+    DATE_FORMAT = '%d.%m.%Y'
+
+    MSG_FORMAT = 'The param "{}" must be in the format like this: "DD.MM.YYYY", but received "{}"'
+
     def _validate(self, value):
         self._check_type(value, str)
         try:
-            value = datetime.datetime.strptime(value, '%d.%m.%Y')
+            value = datetime.datetime.strptime(value, self.DATE_FORMAT)
         except ValueError:
-            raise MyException(response='The param "{}" must be in the format like this:'
-                                       ' "DD.MM.YYYY", but received "{}"'.format(self.field_name, value))
+            raise MyException(response=self.MSG_FORMAT.format(self.field_name, value))
         return value
 
 
 class BirthDayField(DateField):
+    MSG_EXCEED = 'The BirthDayField "{}" must not exceed 70 years from current moment and be positive,' \
+                 ' but there is "{}"'
+
     def _validate(self, value):
         value = super()._validate(value)
         now = datetime.datetime.now()
         delta = now.year - value.year
         if delta >= 70 or delta < 0:
-            raise MyException(response='The BirthDayField "{}" must not exceed 70 years from current moment'
-                                       ' and be positive, but there is "{}"'.format(self.field_name, value))
+            raise MyException(response=self.MSG_EXCEED.format(self.field_name, value))
         return value
 
 
 class GenderField(Field):
+    MSG_GENDERS = f'Gender must be one of the following:\n{GENDERS}'
+
     def _validate(self, value):
         self._check_type(value, int)
         if value not in GENDERS:
-            raise MyException(response='Gender must be one of the following:\n{}'.format(GENDERS))
+            raise MyException(response=self.MSG_GENDERS)
         return value
 
 
 class ClientIDsField(Field):
+    MSG_ERROR = 'All elements the list of param "{}" must be only "{}" type.'
+
     def _validate(self, value):
         self._check_type(value, list)
         for id_ in value:
-            self._check_type(id_, int, text='All elements the list of param "{}" must be only "{}" type.')
+            self._check_type(id_, int, text=self.MSG_ERROR)
         return value
 
 
@@ -331,11 +345,20 @@ def method_handler(request, ctx, store):
         return e.response, e.code
 
 
+class Config:
+
+    def __init__(self, cache_connection_settings: Dict[str, Any], store_connection_settings: Dict[str, Any],
+                 retry_count: int):
+        self.cache_connection_settings = cache_connection_settings
+        self.store_connection_settings = store_connection_settings
+        self.retry_count = retry_count
+
+
 class MainHTTPHandler(BaseHTTPRequestHandler):
     router = {
-        "method": method_handler
+        "method": method_handler,
     }
-    store = None
+    store: Store = None
 
     def get_request_id(self, headers):
         return headers.get('HTTP_X_REQUEST_ID', uuid.uuid4().hex)
@@ -371,21 +394,45 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
             r = {"error": response or ERRORS.get(code, "Unknown Error"), "code": code}
         context.update(r)
         logging.info(context)
-        self.wfile.write(json.dumps(r))
+        self.wfile.write(json.dumps(r).encode())
         return
 
 
-if __name__ == "__main__":
-    op = OptionParser()
-    op.add_option("-p", "--port", action="store", type=int, default=8080)
-    op.add_option("-l", "--log", action="store", default=None)
-    opts, args = op.parse_args()
-    logging.basicConfig(filename=opts.log, level=logging.INFO,
+def get_config(path: str) -> Config:
+    with open(path) as config_file:
+        logging.info('Open file {}'.format(path))
+        return yaml.load(config_file)
+
+
+def get_args():
+    parser = ArgumentParser()
+    parser.add_argument("-p", "--port", action="store", type=int, default=8080)
+    parser.add_argument("-l", "--log", action="store", default=None)
+    parser.add_argument('-c', '--config', required=True, help='Path to the config file, must be filled.',
+                        type=os.path.abspath)
+
+    return parser.parse_args()
+
+
+def main(args=None):
+    if not args:
+        args = get_args()
+    config = get_config(args.config)
+
+    logging.basicConfig(filename=args.log, level=logging.INFO,
                         format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d %H:%M:%S')
-    server = HTTPServer(("localhost", opts.port), MainHTTPHandler)
-    logging.info("Starting server at %s" % opts.port)
+
+    MainHTTPHandler.store = Store(cache_kwargs=config.cache_connection_settings,
+                                  store_kwargs=config.store_connection_settings,
+                                  retry_count=config.retry_count)
+    server = HTTPServer(("localhost", args.port), MainHTTPHandler)
+    logging.info("Starting server at %s" % args.port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     server.server_close()
+
+
+if __name__ == "__main__":
+    main()

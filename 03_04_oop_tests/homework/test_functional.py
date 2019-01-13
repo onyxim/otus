@@ -1,9 +1,22 @@
+import unittest
+from multiprocessing import Process
+
+import json
+import logging
+import time
+from unittest import mock
+
 import datetime
 import functools
 import hashlib
-import unittest
+import os
+import pytest
+import random
+import requests
 
 import api
+from scoring import CID_KEY
+from store import Store
 
 
 def cases(cases):
@@ -19,22 +32,42 @@ def cases(cases):
     return decorator
 
 
+def get_config_path():
+    dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(dir, 'config.yaml')
+
+
+def get_store_for_tests():
+    confif_file_path = get_config_path()
+    config = api.get_config(confif_file_path)
+    return Store(cache_kwargs=config.cache_connection_settings, store_kwargs=config.store_connection_settings,
+                 retry_count=config.retry_count)
+
+
+def get_interest():
+    interests = ("cars", "pets", "travel", "hi-tech", "sport", "music", "books", "tv", "cinema", "geek", "otus")
+    while True:
+        yield random.sample(interests, 2)
+
+
 class TestSuite(unittest.TestCase):
     def setUp(self):
         self.context = {}
         self.headers = {}
-        self.settings = {}
+        self.store = get_store_for_tests()
 
     def get_response(self, request):
-        return api.method_handler({"body": request, "headers": self.headers}, self.context, self.settings)
+        return api.method_handler({"body": request, "headers": self.headers}, self.context, self.store)
 
-    def set_valid_auth(self, request):
+    @staticmethod
+    def set_valid_auth(request):
         if request.get("login") == api.ADMIN_LOGIN:
             date = datetime.datetime.now().strftime("%Y%m%d%H") + api.ADMIN_SALT
             request["token"] = hashlib.sha512(date.encode('utf-8')).hexdigest()
         else:
             msg = request.get("account", "") + request.get("login", "") + api.SALT
             request["token"] = hashlib.sha512(msg.encode('utf-8')).hexdigest()
+        return request
 
     def test_empty_request(self):
         _, code = self.get_response({})
@@ -130,7 +163,9 @@ class TestSuite(unittest.TestCase):
         {"client_ids": [1, 2], "date": "19.07.2017"},
         {"client_ids": [0]},
     ])
-    def test_ok_interests_request(self, arguments):
+    # Решил восстановить работу оригинального теста
+    @mock.patch.object(api, 'get_interests', autospec=True, side_effect=get_interest())
+    def test_ok_interests_request(self, arguments, mock_):
         request = {"account": "horns&hoofs", "login": "h&f", "method": "clients_interests", "arguments": arguments}
         self.set_valid_auth(request)
         response, code = self.get_response(request)
@@ -141,5 +176,70 @@ class TestSuite(unittest.TestCase):
         self.assertEqual(self.context.get("nclients"), len(arguments["client_ids"]))
 
 
-if __name__ == "__main__":
-    unittest.main()
+PORT = 8080
+
+
+@pytest.fixture(scope='module', autouse=True)
+def run_server():
+    args = mock.MagicMock()
+    args.port = PORT
+    args.log = None
+    args.config = get_config_path()
+    p = Process(target=api.main, args=(args,))
+    yield p.start()
+    p.kill()
+
+
+TEST_IDS = [n for n in range(100)]
+TEST_ANSWER = {"test": "test"}
+
+
+@pytest.fixture(scope='module')
+def test_store():
+    store = get_store_for_tests()
+    store._store_conn.flushdb()
+    return store
+
+
+@pytest.fixture(scope='module', autouse=True)
+def prepare_inrest_data(test_store):
+    json_str = json.dumps(TEST_ANSWER)
+    for id_ in TEST_IDS:
+        test_store.cache_set(CID_KEY.format(id_), json_str, 60 * 60)
+
+
+class TestRequests:
+    URL = f'http://localhost:{PORT}/method'
+
+    def make_request(self, request: dict):
+        retry_count = 3
+        for n in range(retry_count):
+            try:
+                return requests.post(self.URL, json=request, timeout=1)
+            except Exception as e:
+                if n == retry_count - 1:
+                    raise e
+            logging.exception('Catch some error.')
+            time.sleep(1)
+
+    def prepare_request(self, method, arguments: dict, admin_user=False):
+        request = {
+            "account": "horns&hoofs",
+            "login": "h&f",
+            "method": method,
+            "arguments": arguments,
+        }
+        if admin_user:
+            request['login'] = api.ADMIN_LOGIN
+        return TestSuite.set_valid_auth(request)
+
+    @pytest.mark.parametrize('ids', [
+        random.sample(TEST_IDS, k=3) for _ in range(4)
+    ])
+    def test_ok_interests_request(self, ids):
+        arguments = {"client_ids": ids, "date": datetime.datetime.today().strftime("%d.%m.%Y")}
+        request = self.prepare_request('clients_interests', arguments)
+        result_part = {str(id_): TEST_ANSWER for id_ in ids}
+        result = {'response': result_part, 'code': api.OK}
+
+        assert self.make_request(request).json() == result
