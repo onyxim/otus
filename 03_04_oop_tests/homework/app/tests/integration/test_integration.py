@@ -1,22 +1,27 @@
 import unittest
 from multiprocessing import Process
-
-import json
-import logging
-import time
 from unittest import mock
 
 import datetime
 import functools
 import hashlib
+import json
+import logging
 import os
 import pytest
 import random
 import requests
+import time
 
 import api
 from scoring import CID_KEY
 from store import Store
+
+# envs for tests
+
+OTUS_TEST_EXT_SERVER_URL = 'OTUS_TEST_EXT_SERVER_URL'
+OTUS_TEST_REDIS_PORT = 'OTUS_TEST_REDIS_PORT'
+OTUS_TEST_REDIS_HOST = 'OTUS_TEST_REDIS_HOST'
 
 
 def cases(cases):
@@ -33,13 +38,25 @@ def cases(cases):
 
 
 def get_config_path():
-    dir = os.path.dirname(os.path.abspath(__file__))
+    dir = os.path.dirname(os.path.abspath(api.__file__))
     return os.path.join(dir, 'config.yaml')
 
 
 def get_store_for_tests():
     confif_file_path = get_config_path()
     config = api.get_config(confif_file_path)
+
+    # Work with params from env vars
+    test_redis_port = os.environ.get(OTUS_TEST_REDIS_PORT)
+    test_redis_host = os.environ.get(OTUS_TEST_REDIS_HOST)
+    if test_redis_host and test_redis_port:
+        test_dict = {
+            'host': test_redis_host,
+            'port': test_redis_port,
+        }
+        config.store_connection_settings.update(test_dict)
+        config.cache_connection_settings.update(test_dict)
+
     return Store(cache_kwargs=config.cache_connection_settings, store_kwargs=config.store_connection_settings,
                  retry_count=config.retry_count)
 
@@ -181,13 +198,14 @@ PORT = 8080
 
 @pytest.fixture(scope='module', autouse=True)
 def run_server():
-    args = mock.MagicMock()
-    args.port = PORT
-    args.log = None
-    args.config = get_config_path()
-    p = Process(target=api.main, args=(args,))
-    yield p.start()
-    p.kill()
+    if not os.environ.get(OTUS_TEST_EXT_SERVER_URL):
+        args = mock.MagicMock()
+        args.port = PORT
+        args.log = None
+        args.config = get_config_path()
+        p = Process(target=api.main, args=(args,))
+        yield p.start()
+        p.kill()
 
 
 TEST_IDS = [n for n in range(100)]
@@ -209,7 +227,7 @@ def prepare_inrest_data(test_store):
 
 
 class TestRequests:
-    URL = f'http://localhost:{PORT}/method'
+    URL = os.getenv(OTUS_TEST_EXT_SERVER_URL, f'http://localhost:{PORT}/method')
 
     def make_request(self, request: dict):
         retry_count = 3
