@@ -3,7 +3,7 @@
 import collections
 import multiprocessing
 import sys
-import time
+from multiprocessing import Queue
 
 import glob
 import gzip
@@ -12,12 +12,9 @@ import logging
 import memcache
 import multiprocessing.pool
 import os
+import time
 from argparse import ArgumentParser
 from concurrent.futures.thread import ThreadPoolExecutor
-# brew install protobuf
-# protoc  --python_out=. ./appsinstalled.proto
-# pip install protobuf
-from multiprocessing import Queue
 from typing import Dict
 
 import appsinstalled_pb2
@@ -106,9 +103,9 @@ def set_multi(memc, data, retry_count=3, retry_timeout=1):
     raise Exception(f'Cant\'t added data into memc {memc}')
 
 
-def send_data(memc_addr: str, queue: Queue, chunk_size: int, stop_value=None, *, dry_run: bool):
+def send_data(memc_addr: str, queue: Queue, chunk_size: int, stop_value=None, *, dry_run: bool, timeout: int):
     if not dry_run:
-        memc = memcache.Client([memc_addr])
+        memc = memcache.Client([memc_addr], socket_timeout=timeout)
     n = 0
     data = {}
     while True:
@@ -138,28 +135,22 @@ def read_file(fn: str, queue: Queue, *, dry_run: bool):
         dot_rename(fn)
 
 
-def main(options):
-    device_memc = {
-        b"idfa": options.idfa,
-        b"gaid": options.gaid,
-        b"adid": options.adid,
-        b"dvid": options.dvid,
-    }
-
+def create_send_queues_tasks(device_memc, options):
     thread_executor_sender = ThreadPoolExecutor()
     # Create necessary queues and start memc client threads for send data
     send_memc_queus = {}
     for name, addr in device_memc.items():
         q = multiprocessing.Queue()
         thread_executor_sender.submit(send_data, addr, q, options.chunk_size, stop_value=STOP_VALUE,
-                                      dry_run=options.dry)
+                                      dry_run=options.dry, timeout=options.timeout)
         send_memc_queus[name] = q
 
-    lines_queue = multiprocessing.Queue()
-    counter_queue = multiprocessing.Queue()
+    return multiprocessing.Queue(), multiprocessing.Queue(), send_memc_queus, thread_executor_sender
 
-    # Run workers for parsing lines
-    process_number = options.worker_processes
+
+def run_workers(device_memc, process_number, lines_queue, counter_queue, send_memc_queus):
+    """Run workers for parsing lines"""
+
     kwds = {
         "stop_value": STOP_VALUE,
         "counter_queue": counter_queue,
@@ -170,13 +161,20 @@ def main(options):
         p = multiprocessing.Process(target=worker, args=args, kwargs=kwds)
         p.start()
         processes.append(p)
+    return processes
 
-    # Run threads for read files
+
+def run_threads_read_files(options, lines_queue):
+    """Run threads for read files"""
     thread_executor_files = ThreadPoolExecutor(options.max_threads)
     for fn in glob.iglob(options.pattern):
         thread_executor_files.submit(read_file, fn, lines_queue, dry_run=options.dry)
+    return thread_executor_files
 
-    # Shutdown script gracefully
+
+def shutdown_script(thread_executor_files, thread_executor_sender, processes, process_number, lines_queue,
+                    send_memc_queus):
+    """Shutdown script gracefully"""
     thread_executor_files.shutdown()
     for _ in range(process_number):
         lines_queue.put(STOP_VALUE)
@@ -186,7 +184,10 @@ def main(options):
         q.put((STOP_VALUE, STOP_VALUE))
     thread_executor_sender.shutdown()
 
-    # Count processed and error lines
+
+def count_lines(process_number, counter_queue):
+    """Count processed and error lines"""
+
     errors_sum = processed_sum = 0
     for _ in range(process_number):
         errors, processed = counter_queue.get()
@@ -199,6 +200,27 @@ def main(options):
         else:
             logging.error("High error rate (%s > %s). Failed load" % (err_rate, NORMAL_ERR_RATE))
     logging.info('Script completed.')
+
+
+def main(options):
+    device_memc = {
+        b"idfa": options.idfa,
+        b"gaid": options.gaid,
+        b"adid": options.adid,
+        b"dvid": options.dvid,
+    }
+
+    lines_queue, counter_queue, send_memc_queus, thread_executor_sender = create_send_queues_tasks(device_memc, options)
+
+    process_number = options.worker_processes
+    processes = run_workers(device_memc, process_number, lines_queue, counter_queue, send_memc_queus)
+
+    thread_executor_files = run_threads_read_files(options, lines_queue)
+
+    shutdown_script(thread_executor_files, thread_executor_sender, processes, process_number, lines_queue,
+                    send_memc_queus)
+
+    count_lines(process_number, counter_queue)
 
 
 def prototest():
@@ -221,6 +243,7 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument("-t", "--test", action="store_true", default=False)
     parser.add_argument("-l", "--log", default=None)
+    parser.add_argument("--timeout", default=5)
     parser.add_argument("--dry", action="store_true", default=False)
     parser.add_argument("--pattern", default="/data/appsinstalled/*.tsv.gz")
     parser.add_argument("--idfa", default="127.0.0.1:33013")
