@@ -10,11 +10,11 @@ import gzip
 import logging
 # pip install python-memcached
 import memcache
-import multiprocessing.pool
 import os
 import time
 from argparse import ArgumentParser
 from concurrent.futures.thread import ThreadPoolExecutor
+from functools import partial
 from typing import Dict
 
 import appsinstalled_pb2
@@ -59,37 +59,6 @@ def parse_appsinstalled(line):
     return AppsInstalled(dev_type, dev_id, lat, lon, apps)
 
 
-def worker(lines_queue: Queue, device_memc: dict, send_memc_queus: Dict[str, Queue], stop_value=None, *,
-           counter_queue: Queue):
-    logging.info(f'PID for worker is {os.getpid()}')
-    processed = errors = 0
-    while True:
-        line = lines_queue.get()
-        if line is stop_value:
-            break
-        line = line.strip()
-        if not line:
-            continue
-        appsinstalled = parse_appsinstalled(line)
-        if not appsinstalled:
-            errors += 1
-            continue
-        dev_type = appsinstalled.dev_type
-        memc_addr = device_memc.get(dev_type)
-        if not memc_addr:
-            errors += 1
-            logging.error("Unknow device type: %s" % appsinstalled.dev_type)
-            continue
-        result = prepare_appsinstalled(appsinstalled)
-        if result:
-            send_memc_queus[dev_type].put(result)
-            processed += 1
-        else:
-            errors += 1
-    counter_queue.put((errors, processed))
-    # exit(0)
-
-
 def set_multi(memc, data, retry_count=3, retry_timeout=1):
     for _ in range(retry_count):
         r = memc.set_multi(data)
@@ -103,65 +72,93 @@ def set_multi(memc, data, retry_count=3, retry_timeout=1):
     raise Exception(f'Cant\'t added data into memc {memc}')
 
 
-def send_data(memc_addr: str, queue: Queue, chunk_size: int, stop_value=None, *, dry_run: bool, timeout: int):
+def send_data(memc_addr: str, queue: Queue, stop_value=None, *, dry_run: bool, timeout: int):
     if not dry_run:
         memc = memcache.Client([memc_addr], socket_timeout=timeout)
-    n = 0
-    data = {}
     while True:
-        n += 1
-        key, ua = queue.get()
-        if not (n % chunk_size) or key is stop_value:
-            if dry_run:
-                for key, ua in data.items():
-                    logging.debug("%s - %s -> %s" % (memc_addr, key, str(ua).replace("\n", " ")))
-            else:
-                set_multi(memc, data)
-            data = {}
-
-        if key is stop_value:
+        chunk_data = queue.get()
+        if chunk_data is stop_value:
             break
-        data[key] = ua
+        if dry_run:
+            for key, ua in chunk_data.items():
+                logging.debug("%s - %s -> %s" % (memc_addr, key, str(ua).replace("\n", " ")))
+        else:
+            set_multi(memc, chunk_data)
     if not dry_run:
         memc.disconnect_all()
 
 
-def read_file(fn: str, queue: Queue, *, dry_run: bool):
+def read_file(fn: str, device_memc: dict, send_memc_queus: Dict[str, Queue], chunk_size: int, dry_run: bool):
     logging.info('Processing %s' % fn)
+    processed = errors = 0
+    to_send_data = collections.defaultdict(dict)
     with gzip.open(fn) as fd:
         for line in fd:
-            queue.put(line)
+            line = line.strip()
+            if not line:
+                continue
+            appsinstalled = parse_appsinstalled(line)
+            if not appsinstalled:
+                errors += 1
+                continue
+            dev_type = appsinstalled.dev_type
+            memc_addr = device_memc.get(dev_type)
+            if not memc_addr:
+                errors += 1
+                logging.error("Unknow device type: %s" % appsinstalled.dev_type)
+                continue
+            result = prepare_appsinstalled(appsinstalled)
+            if result:
+                key, packed = result
+                to_send_data[dev_type][key] = packed
+                processed += 1
+
+                # Continue if not enough data for chunk
+                if len(to_send_data[dev_type]) != chunk_size:
+                    continue
+
+                send_memc_queus[dev_type].put(to_send_data[dev_type])
+                del to_send_data[dev_type]
+            else:
+                errors += 1
+
+    # Send remained data after closing a file.
+    for dev_type, dev_type_data in to_send_data.items():
+        send_memc_queus[dev_type].put(dev_type_data)
+
     if not dry_run:
         dot_rename(fn)
+    return processed, errors
 
 
 def create_send_queues_tasks(device_memc, options):
     thread_executor_sender = ThreadPoolExecutor()
-    # Create necessary queues and start memc client threads for send data
+    # Create necessary queue and start memc client threads for send data
     send_memc_queus = {}
+    manager = multiprocessing.Manager()
     for name, addr in device_memc.items():
-        q = multiprocessing.Queue()
-        thread_executor_sender.submit(send_data, addr, q, options.chunk_size, stop_value=STOP_VALUE,
+        q = manager.Queue()
+        thread_executor_sender.submit(send_data, addr, q, stop_value=STOP_VALUE,
                                       dry_run=options.dry, timeout=options.timeout)
         send_memc_queus[name] = q
 
-    return multiprocessing.Queue(), multiprocessing.Queue(), send_memc_queus, thread_executor_sender
+    return send_memc_queus, thread_executor_sender
 
 
-def run_workers(device_memc, process_number, lines_queue, counter_queue, send_memc_queus):
-    """Run workers for parsing lines"""
+def process_files(device_memc, send_memc_queus, options):
+    """Run workers for parsing lines from files"""
+    processes_count = options.worker_processes
+    pool = multiprocessing.Pool(processes_count, maxtasksperchild=processes_count)
+    all_processed = all_errors = 0
 
-    kwds = {
-        "stop_value": STOP_VALUE,
-        "counter_queue": counter_queue,
-    }
-    args = (lines_queue, device_memc, send_memc_queus)
-    processes = []
-    for _ in range(process_number):
-        p = multiprocessing.Process(target=worker, args=args, kwargs=kwds)
-        p.start()
-        processes.append(p)
-    return processes
+    mod_read_file = partial(read_file, device_memc=device_memc, send_memc_queus=send_memc_queus,
+                            chunk_size=options.chunk_size, dry_run=options.dry)
+    for processed, errors in pool.imap_unordered(mod_read_file, glob.iglob(options.pattern),
+                                                 chunksize=processes_count * 10):
+        all_processed += processed
+        all_errors += errors
+
+    return all_processed, all_errors
 
 
 def run_threads_read_files(options, lines_queue):
@@ -172,27 +169,17 @@ def run_threads_read_files(options, lines_queue):
     return thread_executor_files
 
 
-def shutdown_script(thread_executor_files, thread_executor_sender, processes, process_number, lines_queue,
-                    send_memc_queus):
+def shutdown_script(thread_executor_sender, send_memc_queus):
     """Shutdown script gracefully"""
-    thread_executor_files.shutdown()
-    for _ in range(process_number):
-        lines_queue.put(STOP_VALUE)
-    for p in processes:
-        p.join()
     for q in send_memc_queus.values():
         q.put((STOP_VALUE, STOP_VALUE))
     thread_executor_sender.shutdown()
+    logging.info('All threads and processes has been stopped.')
 
 
-def count_lines(process_number, counter_queue):
+def count_lines(processed_sum, errors_sum):
     """Count processed and error lines"""
 
-    errors_sum = processed_sum = 0
-    for _ in range(process_number):
-        errors, processed = counter_queue.get()
-        errors_sum += errors
-        processed_sum += processed
     if processed_sum:
         err_rate = float(errors_sum) / processed_sum
         if err_rate < NORMAL_ERR_RATE:
@@ -210,17 +197,13 @@ def main(options):
         b"dvid": options.dvid,
     }
 
-    lines_queue, counter_queue, send_memc_queus, thread_executor_sender = create_send_queues_tasks(device_memc, options)
+    send_memc_queus, thread_executor_sender = create_send_queues_tasks(device_memc, options)
 
-    process_number = options.worker_processes
-    processes = run_workers(device_memc, process_number, lines_queue, counter_queue, send_memc_queus)
+    line_counters = process_files(device_memc, send_memc_queus, options)
 
-    thread_executor_files = run_threads_read_files(options, lines_queue)
+    count_lines(*line_counters)
 
-    shutdown_script(thread_executor_files, thread_executor_sender, processes, process_number, lines_queue,
-                    send_memc_queus)
-
-    count_lines(process_number, counter_queue)
+    shutdown_script(thread_executor_sender, send_memc_queus)
 
 
 def prototest():
@@ -254,9 +237,6 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     parser.add_argument("--worker_processes", type=int, default=cpu_count,
                         help='Number of process for parse lines')
-    parser.add_argument("--max_threads", type=int, default=cpu_count * 5,
-                        help='Number of threads for read files and send data to memcached. '
-                             'Default cpu_count *5 as python docs recommendation for threads executor')
     parser.add_argument("--chunk_size", type=int, default=1024, help='Chunk size to send data into memcached')
 
     args = parser.parse_args()
