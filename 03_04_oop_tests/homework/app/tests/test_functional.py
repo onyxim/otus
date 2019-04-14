@@ -1,70 +1,9 @@
+import datetime
 import unittest
-from multiprocessing import Process
 from unittest import mock
 
-import datetime
-import functools
-import hashlib
-import json
-import logging
-import os
-import pytest
-import random
-import requests
-import time
-
 import api
-from scoring import CID_KEY
-from store import Store
-
-# envs for tests
-
-OTUS_TEST_EXT_SERVER_URL = 'OTUS_TEST_EXT_SERVER_URL'
-OTUS_TEST_REDIS_PORT = 'OTUS_TEST_REDIS_PORT'
-OTUS_TEST_REDIS_HOST = 'OTUS_TEST_REDIS_HOST'
-
-
-def cases(cases):
-    def decorator(f):
-        @functools.wraps(f)
-        def wrapper(*args):
-            for c in cases:
-                new_args = args + (c if isinstance(c, tuple) else (c,))
-                f(*new_args)
-
-        return wrapper
-
-    return decorator
-
-
-def get_config_path():
-    dir = os.path.dirname(os.path.abspath(api.__file__))
-    return os.path.join(dir, 'config.yaml')
-
-
-def get_store_for_tests():
-    confif_file_path = get_config_path()
-    config = api.get_config(confif_file_path)
-
-    # Work with params from env vars
-    test_redis_port = os.environ.get(OTUS_TEST_REDIS_PORT)
-    test_redis_host = os.environ.get(OTUS_TEST_REDIS_HOST)
-    if test_redis_host and test_redis_port:
-        test_dict = {
-            'host': test_redis_host,
-            'port': test_redis_port,
-        }
-        config.store_connection_settings.update(test_dict)
-        config.cache_connection_settings.update(test_dict)
-
-    return Store(cache_kwargs=config.cache_connection_settings, store_kwargs=config.store_connection_settings,
-                 retry_count=config.retry_count)
-
-
-def get_interest():
-    interests = ("cars", "pets", "travel", "hi-tech", "sport", "music", "books", "tv", "cinema", "geek", "otus")
-    while True:
-        yield random.sample(interests, 2)
+from tests.helpers import get_store_for_tests, cases, set_valid_auth, get_interest
 
 
 class TestSuite(unittest.TestCase):
@@ -77,15 +16,6 @@ class TestSuite(unittest.TestCase):
         return api.method_handler({"body": request, "headers": self.headers}, self.context, self.store)
 
     @staticmethod
-    def set_valid_auth(request):
-        if request.get("login") == api.ADMIN_LOGIN:
-            date = datetime.datetime.now().strftime("%Y%m%d%H") + api.ADMIN_SALT
-            request["token"] = hashlib.sha512(date.encode('utf-8')).hexdigest()
-        else:
-            msg = request.get("account", "") + request.get("login", "") + api.SALT
-            request["token"] = hashlib.sha512(msg.encode('utf-8')).hexdigest()
-        return request
-
     def test_empty_request(self):
         _, code = self.get_response({})
         self.assertEqual(api.INVALID_REQUEST, code)
@@ -105,7 +35,7 @@ class TestSuite(unittest.TestCase):
         {"account": "horns&hoofs", "method": "online_score", "arguments": {}},
     ])
     def test_invalid_method_request(self, request):
-        self.set_valid_auth(request)
+        set_valid_auth(request)
         response, code = self.get_response(request)
         self.assertEqual(api.INVALID_REQUEST, code)
         self.assertTrue(len(response))
@@ -127,7 +57,7 @@ class TestSuite(unittest.TestCase):
     ])
     def test_invalid_score_request(self, arguments):
         request = {"account": "horns&hoofs", "login": "h&f", "method": "online_score", "arguments": arguments}
-        self.set_valid_auth(request)
+        set_valid_auth(request)
         response, code = self.get_response(request)
         self.assertEqual(api.INVALID_REQUEST, code, arguments)
         self.assertTrue(len(response))
@@ -144,7 +74,7 @@ class TestSuite(unittest.TestCase):
     ])
     def test_ok_score_request(self, arguments):
         request = {"account": "horns&hoofs", "login": "h&f", "method": "online_score", "arguments": arguments}
-        self.set_valid_auth(request)
+        set_valid_auth(request)
         response, code = self.get_response(request)
         self.assertEqual(api.OK, code, arguments)
         score = response.get("score")
@@ -154,7 +84,7 @@ class TestSuite(unittest.TestCase):
     def test_ok_score_admin_request(self):
         arguments = {"phone": "79175002040", "email": "stupnikov@otus.ru"}
         request = {"account": "horns&hoofs", "login": "admin", "method": "online_score", "arguments": arguments}
-        self.set_valid_auth(request)
+        set_valid_auth(request)
         response, code = self.get_response(request)
         self.assertEqual(api.OK, code)
         score = response.get("score")
@@ -170,7 +100,7 @@ class TestSuite(unittest.TestCase):
     ])
     def test_invalid_interests_request(self, arguments):
         request = {"account": "horns&hoofs", "login": "h&f", "method": "clients_interests", "arguments": arguments}
-        self.set_valid_auth(request)
+        set_valid_auth(request)
         response, code = self.get_response(request)
         self.assertEqual(api.INVALID_REQUEST, code, arguments)
         self.assertTrue(len(response))
@@ -184,80 +114,10 @@ class TestSuite(unittest.TestCase):
     @mock.patch.object(api, 'get_interests', autospec=True, side_effect=get_interest())
     def test_ok_interests_request(self, arguments, mock_):
         request = {"account": "horns&hoofs", "login": "h&f", "method": "clients_interests", "arguments": arguments}
-        self.set_valid_auth(request)
+        set_valid_auth(request)
         response, code = self.get_response(request)
         self.assertEqual(api.OK, code, arguments)
         self.assertEqual(len(arguments["client_ids"]), len(response))
         self.assertTrue(all(v and isinstance(v, list) and all(isinstance(i, str) for i in v)
                             for v in response.values()))
         self.assertEqual(self.context.get("nclients"), len(arguments["client_ids"]))
-
-
-PORT = 8080
-
-
-@pytest.fixture(scope='module', autouse=True)
-def run_server():
-    if not os.environ.get(OTUS_TEST_EXT_SERVER_URL):
-        args = mock.MagicMock()
-        args.port = PORT
-        args.log = None
-        args.config = get_config_path()
-        p = Process(target=api.main, args=(args,))
-        yield p.start()
-        p.kill()
-
-
-TEST_IDS = [n for n in range(100)]
-TEST_ANSWER = {"test": "test"}
-
-
-@pytest.fixture(scope='module')
-def test_store():
-    store = get_store_for_tests()
-    store._store_conn.flushdb()
-    return store
-
-
-@pytest.fixture(scope='module', autouse=True)
-def prepare_inrest_data(test_store):
-    json_str = json.dumps(TEST_ANSWER)
-    for id_ in TEST_IDS:
-        test_store.cache_set(CID_KEY.format(id_), json_str, 60 * 60)
-
-
-class TestRequests:
-    URL = os.getenv(OTUS_TEST_EXT_SERVER_URL, f'http://localhost:{PORT}/method')
-
-    def make_request(self, request: dict):
-        retry_count = 3
-        for n in range(retry_count):
-            try:
-                return requests.post(self.URL, json=request, timeout=1)
-            except Exception as e:
-                if n == retry_count - 1:
-                    raise e
-            logging.exception('Catch some error.')
-            time.sleep(1)
-
-    def prepare_request(self, method, arguments: dict, admin_user=False):
-        request = {
-            "account": "horns&hoofs",
-            "login": "h&f",
-            "method": method,
-            "arguments": arguments,
-        }
-        if admin_user:
-            request['login'] = api.ADMIN_LOGIN
-        return TestSuite.set_valid_auth(request)
-
-    @pytest.mark.parametrize('ids', [
-        random.sample(TEST_IDS, k=3) for _ in range(4)
-    ])
-    def test_ok_interests_request(self, ids):
-        arguments = {"client_ids": ids, "date": datetime.datetime.today().strftime("%d.%m.%Y")}
-        request = self.prepare_request('clients_interests', arguments)
-        result_part = {str(id_): TEST_ANSWER for id_ in ids}
-        result = {'response': result_part, 'code': api.OK}
-
-        assert self.make_request(request).json() == result

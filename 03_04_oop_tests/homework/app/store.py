@@ -10,7 +10,7 @@ class Store:
         self._store_conn = Redis(**store_kwargs)
         self._retry_count = retry_count
 
-    def _action_with_store(self, method, *args, **kwargs):
+    def _retry_action_with_store(self, method, *args, **kwargs):
         # Количество попыток проверяется здесь. А таймаут задается в конфиге Redis connection.
         for n in range(self._retry_count):
             try:
@@ -22,13 +22,13 @@ class Store:
                 logging.exception('Some exception happend, will try again')
 
     def cache_set(self, key: str, value: str, ttl: int):
-        return self._action_with_store(self._cache_conn.set, name=key, value=value, ex=ttl)
+        return self._retry_action_with_store(self._cache_conn.set, name=key, value=value, ex=ttl)
 
     def cache_get(self, key: str) -> Union[bytes, None]:
         try:
-            return self._action_with_store(self._cache_conn.get, key)
+            return self._retry_action_with_store(self._cache_conn.get, key)
         except Exception:
             logging.exception('Something wrong with cache store, but whatever we continue.')
 
     def get(self, key: str) -> Union[bytes, None]:
-        return self._action_with_store(self._store_conn.get, key)
+        return self._retry_action_with_store(self._store_conn.get, key)
