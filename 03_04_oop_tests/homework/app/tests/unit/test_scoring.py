@@ -1,13 +1,13 @@
+import datetime
 from unittest import mock
 
-import datetime
 import pytest
 
 import scoring
 from store import Store
 
 
-class Test_get_score:
+class TestGetStore:
     CONST_ARGS = ('7586', 'email@example.com')
     CONST_KWARGS = {'gender': 'male'}
 
@@ -23,7 +23,7 @@ class Test_get_score:
          5.0),
         (None, None, None, 'uid:d41d8cd98f00b204e9800998ecf8427e', 3.0),
     ])
-    def test_fresh_score(self, first_name, last_name, birthday, get_key, score):
+    def test_get_score_fresh_score(self, first_name, last_name, birthday, get_key, score):
         store = self.get_store(None)
 
         r = scoring.get_score(store, *self.CONST_ARGS, first_name=first_name, last_name=last_name, birthday=birthday,
@@ -38,7 +38,7 @@ class Test_get_score:
         ('John', 'Doe', datetime.datetime.strptime('01.01.2000', '%d.%m.%Y'), 'uid:87d4f21e2a10a198d629cdd2e5297b90'),
         (None, None, None, 'uid:d41d8cd98f00b204e9800998ecf8427e'),
     ])
-    def test_success_get_from_cache(self, first_name, last_name, birthday, get_key):
+    def test_get_score_success_get_from_cache(self, first_name, last_name, birthday, get_key):
         store = self.get_store(b'10.0')
 
         r = scoring.get_score(store, *self.CONST_ARGS, first_name=first_name, last_name=last_name, birthday=birthday,
@@ -50,7 +50,7 @@ class Test_get_score:
         store.reset_mock()
 
 
-class Test_get_interests:
+class TestGetInterests:
     @staticmethod
     def get_store(return_value):
         store = mock.create_autospec(Store)
@@ -61,7 +61,7 @@ class Test_get_interests:
         (b'{"test":"test"}', {'test': 'test'}),
         (None, []),
     ])
-    def test_success_return(self, return_mock, return_value):
+    def test_get_interests_success_return(self, return_mock, return_value):
         store = self.get_store(return_mock)
         key = 'test'
 

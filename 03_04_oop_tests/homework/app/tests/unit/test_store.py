@@ -1,7 +1,7 @@
-import pytest
+from collections import OrderedDict
 from unittest import mock
 
-from collections import OrderedDict
+import pytest
 
 from store import Store as OriginalStore
 
@@ -18,41 +18,39 @@ class Store(OriginalStore):
 
 
 @mock.patch('store.Redis', autospec=True, return_value=None)
-def test_Store__init__(mock_redis):
+def test_store__init__(mock_redis):
     store = OriginalStore(cache_kwargs={}, store_kwargs={}, retry_count=1)
     assert store._retry_count == 1
     assert store._store_conn is None
     assert store._cache_conn is None
 
 
-class Test_Store__action_with_store:
-
-    def test_count_overflow(self):
-        m = mock.MagicMock()
-        m.side_effect = [Exception, MyException]
-
-        with pytest.raises(MyException):
-            Store()._action_with_store(m, 'test_key')
-        m.assert_called_with('test_key')
-
-    def test_success_return(self):
-        m = mock.MagicMock()
-        m.side_effect = lambda x: 'test_value'
-        r = Store()._action_with_store(m, 'test_key')
-        assert r == 'test_value'
-
-
 @pytest.fixture
 def mock_action(request):
     return_value, side_effect = request.param
-    patch = mock.patch.object(Store, '_action_with_store', autospec=True, return_value=return_value,
+    patch = mock.patch.object(Store, '_retry_action_with_store', autospec=True, return_value=return_value,
                               side_effect=side_effect)
     yield patch.start()
     patch.stop()
 
 
-class Test_Store_methods_with_action:
-    _action_with_store_return_value = 'some_result'
+class TestStore:
+
+    def test__retry_action_with_store_count_overflow(self):
+        m = mock.MagicMock()
+        m.side_effect = [Exception, MyException]
+
+        with pytest.raises(MyException):
+            Store()._retry_action_with_store(m, 'test_key')
+        m.assert_called_with('test_key')
+
+    def test__retry_action_with_store_success_return(self):
+        m = mock.MagicMock()
+        m.side_effect = lambda x: 'test_value'
+        r = Store()._retry_action_with_store(m, 'test_key')
+        assert r == 'test_value'
+
+    _retry_action_with_store_return_value = 'some_result'
 
     @staticmethod
     def edited_store(attr, method_name):
@@ -62,17 +60,17 @@ class Test_Store_methods_with_action:
         setattr(s, attr, m)
         return s
 
-    @pytest.mark.parametrize('mock_action', [(_action_with_store_return_value, None)], indirect=True)
-    def test_cache_set(self, mock_action):
+    @pytest.mark.parametrize('mock_action', [(_retry_action_with_store_return_value, None)], indirect=True)
+    def test_set(self, mock_action):
         params = OrderedDict((('name', 'test_key'), ('value', 'test_value'), ('ex', 3600)))
         store = self.edited_store('_cache_conn', 'set')
 
         # Call actual method
-        assert store.cache_set(*params.values()) == self._action_with_store_return_value
+        assert store.cache_set(*params.values()) == self._retry_action_with_store_return_value
         mock_action.assert_called_with(store, store._cache_conn.set, **params)
 
     @pytest.mark.parametrize('mock_action,result', [
-        ((_action_with_store_return_value, None), _action_with_store_return_value),
+        ((_retry_action_with_store_return_value, None), _retry_action_with_store_return_value),
         ((None, MyException), None),
     ], indirect=['mock_action'])
     def test_cache_get(self, mock_action, result):
@@ -83,11 +81,11 @@ class Test_Store_methods_with_action:
         assert store.cache_get(key) == result
         mock_action.assert_called_with(store, store._cache_conn.get, key)
 
-    @pytest.mark.parametrize('mock_action', [(_action_with_store_return_value, None)], indirect=True)
+    @pytest.mark.parametrize('mock_action', [(_retry_action_with_store_return_value, None)], indirect=True)
     def test_get(self, mock_action):
         key = 'some_key'
         store = self.edited_store('_store_conn', 'get')
 
         # Call actual method
-        assert store.get(key) == self._action_with_store_return_value
+        assert store.get(key) == self._retry_action_with_store_return_value
         mock_action.assert_called_with(store, store._store_conn.get, key)
