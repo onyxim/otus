@@ -1,0 +1,6 @@
+<!-- Tags -->
+<p> Tags:
+    {% for tag in question.tags.all %}
+        <a href="{% url 'index' %}?q=tag:{{ tag.name }}" class="ui blue label">{{ tag.name }}</a>
+    {% endfor %}
+</p>

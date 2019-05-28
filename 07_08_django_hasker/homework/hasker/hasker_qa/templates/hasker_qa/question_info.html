@@ -1,0 +1,19 @@
+{% load staticfiles %}
+<h1>
+    <a href="{{ question.get_absolute_url }}">{{ question.title }}</a>
+</h1>
+<div>
+    {% if question.author.avatar %}
+        <img src="{{ media_prefix }}{{ question.author.avatar }}" height="30" width="30"
+             alt="{{ question.author.username }}">
+    {% endif %}
+    {{ user.username }}
+    asked by: {{ question.author.username }}
+
+</div>
+<div>
+    {{ question.creation_date }}
+</div>
+
+<p>{{ question.text }}</p>
+Rating: {{ question.votes_sum }}

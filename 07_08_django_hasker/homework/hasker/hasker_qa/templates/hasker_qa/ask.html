@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <form action="{% url 'ask' %}" method="post">
+        {% include "bootstrap_form.html" %}
+    </form>
+{% endblock %}

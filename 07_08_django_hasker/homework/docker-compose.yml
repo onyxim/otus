@@ -1,0 +1,36 @@
+version: '3.7'
+
+services:
+
+  pg:
+    image: postgres:11.3-alpine
+    restart: always
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  nginx:
+    image: nginx:1.15.12-alpine
+    network_mode: "host"
+    ports:
+      - "80:80"
+    volumes:
+      - ./hasker/static:/usr/share/nginx/html
+      - ./docker/nginx:/etc/nginx/conf.d
+
+  uwsgi:
+    image: hasker_uwsgi
+    # если указать --socket то будет слушать uwsgi протоколом
+    command: uwsgi --socket :8000 --module config.wsgi
+    network_mode: "host"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./hasker:/var/hasker
+    depends_on:
+      - pg
+
+
+volumes:
+  pg_data: {}
