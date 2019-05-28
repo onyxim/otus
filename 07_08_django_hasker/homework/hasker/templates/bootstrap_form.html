@@ -1,31 +1,33 @@
-{% block form %}
+{% extends 'base.html' %}
 
-    {% csrf_token %}
-    <fieldset>
-        {% for field in form %}
-            {% if field.errors %}
-                <div class="control-group error">
-                    <label class="control-label">{{ field.label }}</label>
-                    <div class="controls">{{ field }}
-                        <span class="help-inline">
+{% block content %}
+    <form action="{{ form_url }}" method="post">
+        {% csrf_token %}
+        <fieldset>
+            {% for field in form %}
+                {% if field.errors %}
+                    <div class="control-group error">
+                        <label class="control-label">{{ field.label }}</label>
+                        <div class="controls">{{ field }}
+                            <span class="help-inline">
                             {% for error in  field.errors %}{{ error }}{% endfor %}
                         </span>
+                        </div>
                     </div>
-                </div>
-            {% else %}
-                <div class="control-group">
-                    <label class="control-label">{{ field.label }}</label>
-                    <div class="controls">{{ field }}
-                        {% if field.help_text %}
-                            <p class="help-inline">
-                                <small>{{ field.help_text }}</small>
-                            </p>
-                        {% endif %}
+                {% else %}
+                    <div class="control-group">
+                        <label class="control-label">{{ field.label }}</label>
+                        <div class="controls">{{ field }}
+                            {% if field.help_text %}
+                                <p class="help-inline">
+                                    <small>{{ field.help_text }}</small>
+                                </p>
+                            {% endif %}
+                        </div>
                     </div>
-                </div>
-            {% endif %}
-        {% endfor %}
-    </fieldset>
-    <button type="submit" class="btn btn-primary mt-sm-2">Submit</button>
-
+                {% endif %}
+            {% endfor %}
+        </fieldset>
+        <button type="submit" class="btn btn-primary mt-sm-2">Submit</button>
+    </form>
 {% endblock %}

@@ -33,60 +33,52 @@
     <div>
         {% for answer in answers %}
             <div>
-                <div>
-                    <img src="{{ answer.author.profile.avatar.url }}">
-                </div>
-                <div>
-                    <p>{{ answer.text }}</p>
-                    <div class="extra">
-                        <p>
-                            {% if answer.author.avatar %}
-                                <img src="{{ media_prefix }}{{ answer.author.avatar }}" height="30" width="30"
-                                     alt="{{ question.author.username }}">
-                            {% endif %}
-                            Answered by: {{ answer.author.username }}
-                        </p>
-                        <p> Answer date: {{ answer.creation_date }}</p>
-
-                        <p>Rating: {{ answer.votes_sum }}</p>
-
-                        <!-- Vote block -->
-                        {% if user.is_authenticated and user != answer.author %}
-                            <form method="post" action={% url 'answer_vote' answer.id %}>
-                                {% csrf_token %}
-                                <input type="hidden" name="sign" value="-1">
-                                {% if answer.vote_status == -1 %}
-                                    <input class="button" type="submit" value="already -1" aria-pressed="true"/>
-                                {% else %}
-                                    <input class="button" type="submit" value="-1"/>
-                                {% endif %}
-                            </form>
-                            <form method="post" action={% url 'answer_vote' answer.id %}>
-                                {% csrf_token %}
-                                <input type="hidden" name="sign" value="1">
-                                {% if answer.vote_status == 1 %}
-                                    <input class="button" type="submit" value="already +1" aria-pressed="true"/>
-                                {% else %}
-                                    <input class="button" type="submit" value="+1"/>
-                                {% endif %}
-                            </form>
+                <p>{{ answer.text }}</p>
+                <div class="extra">
+                    <p>
+                        {% if answer.author.avatar %}
+                            <img src="{{ media_prefix }}{{ answer.author.avatar }}" height="30" width="30"
+                                 alt="{{ question.author.username }}">
                         {% endif %}
+                        Answered by: {{ answer.author.username }}
+                    </p>
+                    <p> Answer date: {{ answer.creation_date }}</p>
 
-                        {% if user == question.author %}
-                            <form method="post" action={% url 'answer_mark' answer.id %}>
-                                {% csrf_token %}
-                                {% if answer.correct_answer %}
-                                    <input class="button" type="submit" value="UnMark correct!"/>
-                                {% else %}
-                                    <input class="button" type="submit" value="Mark correct!"/>
-                                {% endif %}
-                            </form>
-                        {% else %}
-                            {% if answer.correct_answer %}
-                                <p>This is correct answer!</p>
+                    <p>Rating: {{ answer.votes_sum }}</p>
+
+                    <!-- Vote block -->
+                    {% if user.is_authenticated and user != answer.author %}
+                        <form method="post" action={% url 'answer_vote' answer.id %}>
+                            {% csrf_token %}
+                            <input type="hidden" name="sign" value="-1">
+                            {% if answer.vote_status == -1 %}
+                                <input class="button" type="submit" value="already -1" aria-pressed="true"/>
+                            {% else %}
+                                <input class="button" type="submit" value="-1"/>
                             {% endif %}
+                        </form>
+                        <form method="post" action={% url 'answer_vote' answer.id %}>
+                            {% csrf_token %}
+                            <input type="hidden" name="sign" value="1">
+                            {% if answer.vote_status == 1 %}
+                                <input class="button" type="submit" value="already +1" aria-pressed="true"/>
+                            {% else %}
+                                <input class="button" type="submit" value="+1"/>
+                            {% endif %}
+                        </form>
+                    {% endif %}
+
+                    {% if user == question.author %}
+                        <form method="post" action={% url 'answer_mark' answer.id %}>
+                            {% csrf_token %}
+                            <input class="button" type="submit"
+                                   value="{% if answer.correct_answer %}UnMark correct!{% else %}Mark correct!{% endif %}"/>
+                        </form>
+                    {% else %}
+                        {% if answer.correct_answer %}
+                            <p>This is correct answer!</p>
                         {% endif %}
-                    </div>
+                    {% endif %}
                 </div>
             </div>
             <hr class="my-4">

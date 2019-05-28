@@ -4,11 +4,11 @@ from django.views.generic import CreateView, UpdateView
 
 from hasker_accounts.forms import SignupForm, SettingsForm
 from hasker_accounts.models import User
-from hasker_qa.views import get_trending
+from hasker_qa.views import common_context
 
 
 class SignupView(CreateView):
-    template_name = 'hasker_accounts/signup.html'
+    template_name = 'bootstrap_form.html'
     form_class = SignupForm
     success_url = '/'
 
@@ -19,12 +19,12 @@ class SignupView(CreateView):
 
     def get_context_data(self, *, object_list=None, **kwargs):
         context = super().get_context_data(object_list=None, **kwargs)
-        get_trending(context)
+        common_context(context, 'signup')
         return context
 
 
 class SettingsView(UpdateView):
-    template_name = 'hasker_accounts/settings.html'
+    template_name = 'bootstrap_form.html'
     form_class = SettingsForm
     success_url = '/'
     model = User
@@ -34,7 +34,7 @@ class SettingsView(UpdateView):
 
     def get_context_data(self, *, object_list=None, **kwargs):
         context = super().get_context_data(object_list=None, **kwargs)
-        get_trending(context)
+        common_context(context, 'settings')
         return context
 
 

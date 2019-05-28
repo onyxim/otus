@@ -6,6 +6,7 @@ from django.db.models import Sum, F, Q
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest, QueryDict
 from django.shortcuts import redirect
+from django.urls import reverse
 from django.views.generic import CreateView, ListView, DetailView
 from django.views.generic.detail import BaseDetailView
 
@@ -18,11 +19,16 @@ question_query_set = Question.objects. \
     select_related('author')
 
 
-def get_trending(context: dict):
+def common_context(context: dict, form_url: str = ''):
     context.update({
         'trending_questions': IndexView.queryset.order_by('-votes_sum'),
     }
     )
+    if form_url:
+        context.update({
+            'form_url': reverse(form_url),
+        }
+        )
 
 
 class IndexView(ListView):
@@ -91,7 +97,7 @@ class AskView(LoginRequiredMixin, CreateView):
 
     def get_context_data(self, *, object_list=None, **kwargs):
         context = super().get_context_data(object_list=None, **kwargs)
-        get_trending(context)
+        common_context(context, 'ask')
         return context
 
     def get_success_url(self):
@@ -128,16 +134,13 @@ class QuestionView(DetailView):
         context.update({
             'answers': answers_list
         })
-        get_trending(context)
+        common_context(context)
         return context
 
 
 class AnswerView(LoginRequiredMixin, CreateView):
     form_class = AnswerForm
     http_method_names = ['post']
-
-    def form_invalid(self, form):
-        pass
 
     def form_valid(self, form):
         obj: Answer = form.instance

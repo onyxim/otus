@@ -77,19 +77,15 @@ class Answer(models.Model):
     def get_absolute_url(self):
         return Question.get_url(self.question.id)
 
-    def mark_correct_answer(self):
-        pass
-
-
-SIGN_CHOICES = [
-    (1, 'Plus'),
-    (-1, 'Minus'),
-]
-
 
 class AbstractVoteUser(models.Model):
     class Meta:
         abstract = True
+
+    SIGN_CHOICES = [
+        (1, 'Plus'),
+        (-1, 'Minus'),
+    ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     sign = models.SmallIntegerField(choices=SIGN_CHOICES)

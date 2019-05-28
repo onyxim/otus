@@ -1,6 +1,6 @@
 from django import forms
 
-from hasker_qa.models import Question, Answer, SIGN_CHOICES
+from hasker_qa.models import Question, Answer, AbstractVoteUser
 
 
 class AskForm(forms.ModelForm):
@@ -35,7 +35,7 @@ class AnswerForm(forms.ModelForm):
 
 
 class VoteForm(forms.Form):
-    sign = forms.ChoiceField(choices=SIGN_CHOICES, required=True)
+    sign = forms.ChoiceField(choices=AbstractVoteUser.SIGN_CHOICES, required=True)
 
     def clean_sign(self):
         return int(self.cleaned_data['sign'])

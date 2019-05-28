@@ -12,23 +12,7 @@
             <hr class="my-4">
         {% endfor %}
 
-        <div class="pagination">
-    <span class="step-links">
-        {% if page_obj.has_previous %}
-            <a href="?{{ request.GET.urlencode }}&page=1">&laquo; first</a>
-            <a href="?{{ request.GET.urlencode }}&page={{ page_obj.previous_page_number }}">previous</a>
-        {% endif %}
-
-        <span class="current">
-            Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}.
-        </span>
-
-        {% if page_obj.has_next %}
-            <a href="?{{ request.GET.urlencode }}&page={{ page_obj.next_page_number }}">next</a>
-            <a href="?{{ request.GET.urlencode }}&page={{ page_obj.paginator.num_pages }}">last &raquo;</a>
-        {% endif %}
-    </span>
-        </div>
+        {% include 'pagination.html' %}
     {% else %}
         <h1>There are no questions find!</h1>
     {% endif %}
